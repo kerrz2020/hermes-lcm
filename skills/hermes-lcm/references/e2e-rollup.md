@@ -56,8 +56,13 @@ then drive the operator command on a copy of a store with none.
 - **Aux summarizer timeout** (60 s per attempt, no fallback chain) does not fail a build:
   the pass degrades to deterministic truncation and the row still reaches `ready`. Content
   can be shorter than the token target — inspect `token_count` before blaming the rollup.
-- **`building` or `failed` left behind** means a maintenance pass died mid-flight; the
-  store reclaims expired `building` leases on the next pass, and the row can be rebuilt.
+- **`building` or `failed` left behind** means a maintenance pass died mid-flight — a
+  graceful `/restart` landing during compaction is the usual cause. The lease is reclaimed
+  only inside `run_rollup_maintenance()`, which the engine schedules on session **bind**,
+  so the cure is a new session (`/new`), not time and not the operator lever:
+  `upsert_stale_many` deliberately leaves an in-flight `building` row alone, so
+  `/lcm rollups rebuild` cannot clear it. `lcm_recent` stays correct meanwhile (leaf
+  fallback) and a later pass rebuilds and bumps `generation` unattended.
 - **Operator command never runs** while the plugin's scheduler holds the lease: it is
   skipped in-process and reports busy rather than fighting the background worker.
 
