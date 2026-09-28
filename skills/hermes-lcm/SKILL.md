@@ -23,6 +23,7 @@ Reference map:
 - Recall tools and routing: `references/recall-tools.md`
 - `/new`, session continuity, and `/lcm rotate`: `references/session-lifecycle.md`
 - Canonical runtime recall policy: `references/recall-policy.md`
+- Temporal rollups, forced builds, and end-to-end proof: `references/e2e-rollup.md`
 
 Working rules:
 
