@@ -55,6 +55,7 @@ from . import rollup_builder
 from .rollup_store import RollupStore
 from .session_patterns import build_session_match_keys, matches_session_pattern
 from .store import build_message_fts_spec
+from .sqlite_util import run_pragma_on_fresh_connection
 from .chunking import (
     VALID_CONTENT_POLICIES,
     chunk_message,
@@ -1298,8 +1299,11 @@ def _doctor_text(engine) -> str:
             return f"error: {exc}"
 
     try:
-        integrity_row = store_conn.execute("PRAGMA integrity_check").fetchone()
-        integrity = str(integrity_row[0]) if integrity_row else "unknown"
+        integrity = run_pragma_on_fresh_connection(
+            db_path, "integrity_check", fallback_conn=store_conn
+        )
+        if integrity != "ok":
+            issues.append("sqlite_integrity")
     except Exception as exc:  # pragma: no cover - defensive
         integrity = f"error: {exc}"
         issues.append("sqlite_integrity")
@@ -1378,8 +1382,11 @@ def _doctor_text(engine) -> str:
         journal_mode = f"error: {exc}"
         issues.append("sqlite_journal_mode")
     try:
-        quick_row = store_conn.execute("PRAGMA quick_check").fetchone()
-        quick_check = str(quick_row[0]) if quick_row else "unknown"
+        quick_check = run_pragma_on_fresh_connection(
+            db_path, "quick_check", fallback_conn=store_conn
+        )
+        if quick_check != "ok":
+            issues.append("sqlite_quick_check")
     except Exception as exc:  # pragma: no cover - defensive
         quick_check = f"error: {exc}"
         issues.append("sqlite_quick_check")

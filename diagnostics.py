@@ -80,6 +80,13 @@ def doctor_guidance_for_check(check: dict[str, Any]) -> dict[str, Any] | None:
 
     if name == "database_integrity":
         command = "stop and inspect the SQLite database path; restore from backup if integrity_check is not ok"
+    elif name == "engine_connection_integrity_view":
+        command = "restart Hermes to rebind the LCM engine connection; the database file itself passed integrity_check"
+        warning_only = True
+        rationale = (
+            "a long-lived engine connection can hold an FTS5 segment view from before an index "
+            "merge; the disagreement is connection drift, not file corruption"
+        )
     elif name == "schema_core_tables":
         command = "verify HERMES_HOME/LCM_DATABASE_PATH points at the intended LCM database before repair or restore"
     elif name in {"messages_fts_integrity", "nodes_fts_integrity", "fts_index_sync"}:

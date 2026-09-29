@@ -262,3 +262,47 @@ def _temporary_sqlite_busy_timeout(
     finally:
         for conn, original in reversed(originals):
             conn.execute(f"PRAGMA busy_timeout={original}")
+
+
+def run_pragma_on_fresh_connection(
+    db_path: "str | os.PathLike[str]",
+    pragma: str,
+    *,
+    fallback_conn: sqlite3.Connection | None = None,
+    timeout: float = 5.0,
+) -> str:
+    """Answer a read-only integrity PRAGMA from a dedicated short-lived connection.
+
+    Integrity verdicts describe the database FILE, so they must not come from a
+    connection that stayed open across an FTS5 segment merge: such a connection
+    can answer with a phantom ``fts5: corruption found reading blob N`` for an
+    index generation that no longer exists on disk, turning a healthy database
+    into an ``unhealthy`` doctor verdict. ``fallback_conn`` covers databases with
+    no openable file (an in-memory store).
+    """
+    path = Path(str(db_path)).absolute()
+    if not path.is_file():
+        if fallback_conn is None:
+            return f"error: database file not found: {path}"
+        row = fallback_conn.execute(f"PRAGMA {pragma}").fetchone()
+        return str(row[0]) if row else "no response"
+
+    def _once(target: str, as_uri: bool) -> str:
+        conn = sqlite3.connect(target, uri=as_uri, timeout=timeout)
+        try:
+            row = conn.execute(f"PRAGMA {pragma}").fetchone()
+            return str(row[0]) if row else "no response"
+        finally:
+            conn.close()
+
+    try:
+        # A read-only connection cannot create missing -wal/-shm sidecars, so a
+        # cleanly checkpointed database can refuse to open it; retry read-write.
+        return _once(path.as_uri() + "?mode=ro", True)
+    except sqlite3.OperationalError:
+        try:
+            return _once(str(path), False)
+        except sqlite3.Error as exc:
+            return f"error: {exc}"
+    except sqlite3.Error as exc:
+        return f"error: {exc}"

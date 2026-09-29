@@ -25840,6 +25840,48 @@ class TestEngineTools:
             "detail": "malformed inverted index for FTS5 table main.nodes_fts",
         }
 
+    def test_handle_doctor_trusts_the_database_file_over_a_drifted_connection(self, engine, monkeypatch):
+        """A long-lived connection's phantom FTS5 blob must not decide the file verdict.
+
+        Regression (2026-09-29): an engine connection that stayed open across an
+        FTS5 segment merge answered ``PRAGMA integrity_check`` with
+        "corruption found reading blob N" for an index generation that no longer
+        existed on disk. That reported a healthy database as ``unhealthy`` and
+        told the operator to restore from backup.
+        """
+        real = engine._store.connection
+        phantom_detail = 'fts5: corruption found reading blob 1924145348609 from table "nodes_fts"'
+
+        class _StubCursor:
+            def __init__(self, value):
+                self._value = value
+
+            def fetchone(self):
+                return (self._value,)
+
+        class _DriftedConnection:
+            def execute(self, sql, *args, **kwargs):
+                if "integrity_check" in sql:
+                    return _StubCursor(phantom_detail)
+                return real.execute(sql, *args, **kwargs)
+
+            def __getattr__(self, name):
+                return getattr(real, name)
+
+        monkeypatch.setattr(
+            type(engine._store), "connection", property(lambda self: _DriftedConnection())
+        )
+
+        result = json.loads(engine.handle_tool_call("lcm_doctor", {}))
+        checks = {check["check"]: check for check in result["checks"]}
+
+        assert checks["database_integrity"]["status"] == "pass"
+        assert checks["database_integrity"]["detail"] == "ok"
+        assert checks["sqlite_storage"]["status"] == "pass"
+        assert checks["engine_connection_integrity_view"]["status"] == "warn"
+        assert checks["engine_connection_integrity_view"]["detail"]["engine_connection"] == phantom_detail
+        assert result["overall"] != "unhealthy"
+
     def test_handle_doctor_treats_legacy_blank_source_rows_as_healthy(self, engine):
         for source in (None, "", "   ", "\t\n"):
             engine._store._conn.execute(

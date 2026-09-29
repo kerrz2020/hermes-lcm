@@ -81,7 +81,7 @@ from .retrieval_core import (
 from .rollup_store import RollupStore
 from .search_query import AGE_DECAY_RATE, normalize_search_sort
 from .session_patterns import build_session_match_keys, compile_session_pattern
-from .sqlite_util import _sqlite_savepoint
+from .sqlite_util import _sqlite_savepoint, run_pragma_on_fresh_connection
 from .store import build_message_fts_spec
 from .vector_store import VectorStore
 
@@ -6564,20 +6564,38 @@ def lcm_doctor(args: Dict[str, Any], **kwargs) -> str:
     # foreground has ever been bound.
     session_id = engine.current_session_id
 
-    # 1. Database integrity
+    # 1. Database integrity — the verdict describes the database FILE, so it
+    # comes from a dedicated short-lived connection. The engine's long-lived
+    # connection can still hold an FTS5 segment view from before an index merge
+    # and answer with a phantom "corruption found reading blob N" naming a
+    # generation that no longer exists on disk (observed 2026-09-29: two of the
+    # generic checks reported corruption for ~1.5h of session writes while the
+    # file, every backup copy and the plugin's own FTS checks said ok).
+    db_file = Path(engine._store.db_path)
+    file_integrity = run_pragma_on_fresh_connection(
+        db_file, "integrity_check", fallback_conn=engine._store.connection
+    )
+    checks.append({
+        "check": "database_integrity",
+        "status": "pass" if file_integrity == "ok" else "fail",
+        "detail": file_integrity,
+    })
+    # A disagreement is connection drift, not file corruption: surface it as its
+    # own warning instead of letting it decide the file verdict.
     try:
-        result = engine._store.connection.execute("PRAGMA integrity_check").fetchone()
-        ok = result and result[0] == "ok"
+        live_row = engine._store.connection.execute("PRAGMA integrity_check").fetchone()
+        live_integrity = str(live_row[0]) if live_row else "no response"
+    except Exception as exc:
+        live_integrity = f"error: {exc}"
+    if file_integrity == "ok" and live_integrity != "ok":
         checks.append({
-            "check": "database_integrity",
-            "status": "pass" if ok else "fail",
-            "detail": result[0] if result else "no response",
-        })
-    except Exception as e:
-        checks.append({
-            "check": "database_integrity",
-            "status": "fail",
-            "detail": str(e),
+            "check": "engine_connection_integrity_view",
+            "status": "warn",
+            "detail": {
+                "engine_connection": live_integrity,
+                "database_file": file_integrity,
+                "guidance": "restart Hermes to rebind the engine connection; the file passed integrity_check",
+            },
         })
 
     # Ingest health: a swallowed persistence error means turns were not
@@ -6679,17 +6697,21 @@ def lcm_doctor(args: Dict[str, Any], **kwargs) -> str:
     # 2. SQLite storage posture and payload diagnostics
     try:
         journal_mode_row = engine._store.connection.execute("PRAGMA journal_mode").fetchone()
-        quick_check_row = engine._store.connection.execute("PRAGMA quick_check").fetchone()
+        # Same file-vs-connection split as database_integrity: quick_check must
+        # answer for the file, not for one long-lived connection's cached view.
+        quick_check = run_pragma_on_fresh_connection(
+            engine._store.db_path, "quick_check", fallback_conn=engine._store.connection
+        )
         db_path = Path(engine._store.db_path)
         wal_path = Path(str(db_path) + "-wal")
         checks.append({
             "check": "sqlite_storage",
-            "status": "pass" if quick_check_row and quick_check_row[0] == "ok" else "fail",
+            "status": "pass" if quick_check == "ok" else "fail",
             "detail": {
                 "database_path": str(db_path),
                 "database_exists": db_path.exists(),
                 "journal_mode": journal_mode_row[0] if journal_mode_row else "unknown",
-                "quick_check": quick_check_row[0] if quick_check_row else "unknown",
+                "quick_check": quick_check,
                 "database_size_bytes": db_path.stat().st_size if db_path.exists() else 0,
                 "wal_size_bytes": wal_path.stat().st_size if wal_path.exists() else 0,
             },

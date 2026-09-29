@@ -12,6 +12,12 @@ Use read-only product tools before changing configuration or running an apply pa
 
 If optional slash commands are enabled, `/lcm status` and `/lcm doctor` expose the corresponding operator views.
 
+## Reading integrity verdicts
+
+`database_integrity` and `sqlite_storage` answer for the database FILE, from a dedicated short-lived connection. A long-lived engine connection can hold an FTS5 segment view from before an index merge and answer `PRAGMA integrity_check` with `fts5: corruption found reading blob N`, naming a segment that no longer exists on disk. In that case the file checks stay healthy and `engine_connection_integrity_view` reports the drift instead: restart Hermes to rebind, do not restore from backup.
+
+Before acting on any corruption claim, reproduce it: run `pragma quick_check` on a fresh read-only connection and against a copy of `lcm.db*`. FTS indexes are rebuildable (`/lcm doctor repair`); only a verdict that reproduces on a fresh connection justifies restore.
+
 ## Safe mutation order
 
 For cleanup, repair, source normalization, or rotate:
