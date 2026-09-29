@@ -1,5 +1,6 @@
 name: hermes-lcm
 version: 1.0.0-rc.1
+python_runtime: external  # Hermes installs nothing for this plugin and leaves its lint-only pyproject alone (hermes#122148)
 description: "Lossless Context Management — standalone Hermes plugin with a DAG-based context engine that never loses a message"
 author: "Voltropy / Hermes Community"
 provides_tools:
