@@ -11,6 +11,17 @@ This repo also publishes GitHub Releases. This file is the repo-root release sur
   and treats sidecar absence with no open store connection as benign
   (warn-once). Missing databases get their own health message; the pre/post
   connect identity race is closed on all init paths, including the keeper.
+- A Desktop-spawned `serve`/`dashboard` backend defaults to its own store
+  (`<hermes_home>/lcm-desktop.db`) instead of the shared `lcm.db`. Such a backend is a
+  second long-lived read-write owner of the default store — the two-writer contour
+  behind the deleted-sidecar corruption class (#588/#628) — so it no longer shares a
+  file with the messaging gateway. Ownership is core's own test, not an argv scan:
+  `HERMES_DESKTOP=1` plus the per-spawn credential the terminal pane never receives
+  (token env for the local pool spawn, the 0600 token FILE on argv for the SSH spawn),
+  because the marker alone is inherited by every shell and agent child the app launches
+  (#116107 class). `LCM_DATABASE_PATH` still wins, so a supervised unit that pins its
+  own file is unaffected; the tradeoff is the same one that override documents: backend
+  sessions no longer share transcript recall with the gateway store.
 
 ## v1.0.0-rc.1 - 2026-09-03
 

@@ -12,6 +12,7 @@ import logging
 import os
 import re
 import sqlite3
+import sys
 import threading
 import time
 import weakref
@@ -397,6 +398,43 @@ def _normalize_total_compactions(value: Any) -> int:
     return value
 
 
+# A `hermes serve`/`dashboard` backend is a SECOND long-lived owner of the
+# default store: it holds `<home>/lcm.db` read-write for its whole lifetime,
+# next to the gateway that owns the same file. Two long-lived writers on one
+# WAL store is the deleted-sidecar contour that produced page-level corruption
+# (upstream #588/#601/#628), so the surface gets its own store instead.
+# `LCM_DATABASE_PATH` still wins — the supervised `hermes-serve` unit pins its
+# own file that way — and this is the same tradeoff that override documents:
+# backend sessions no longer share transcript recall with the gateway store.
+SURFACE_BACKEND_STORE_NAME = "lcm-desktop.db"
+
+
+def _runs_surface_backend() -> bool:
+    """True when this process is the serve/dashboard backend the Desktop app spawned.
+
+    Core's own two-shape test: `HERMES_DESKTOP=1` alone proves nothing (every shell and
+    agent child the app launches inherits it — #116107 class), so ownership also needs the
+    per-spawn credential the terminal pane never receives — the local pool spawn mints
+    `HERMES_DASHBOARD_SESSION_TOKEN`, the SSH spawn passes a 0600 token FILE on argv.
+
+    Composed here rather than calling `hermes_cli.process_identity.is_desktop_owned_backend`
+    because that module imports `utils` -> `ruamel`, which is missing from some interpreters
+    the plugin loads into; `_startup_fast` is stdlib-only. If the helper is unavailable we
+    are not a backend — the pre-change behaviour: store stays `lcm.db`, and a stray
+    long-lived second owner still surfaces as a problem in the lcm-health probe.
+    """
+    if os.environ.get("HERMES_DESKTOP") != "1":
+        return False
+    if os.environ.get("HERMES_DASHBOARD_SESSION_TOKEN"):
+        return True
+    try:
+        from hermes_cli._startup_fast import is_desktop_ssh_backend_argv
+
+        return is_desktop_ssh_backend_argv(list(sys.argv[1:]))
+    except Exception:
+        return False
+
+
 class LCMEngine(CompactionMixin, ResetStateMixin, ReconcileMixin, AuxiliarySessionMixin, PlaceholderLedgerMixin, BypassMixin, ContextEngine):
     """Lossless Context Management engine.
 
@@ -769,9 +807,10 @@ class LCMEngine(CompactionMixin, ResetStateMixin, ReconcileMixin, AuxiliarySessi
         """Resolve the SQLite path for the active Hermes profile/home."""
         if self._config.database_path:
             return Path(self._config.database_path)
-        if hermes_home:
-            return Path(hermes_home) / "lcm.db"
-        return Path.home() / ".hermes" / "lcm.db"
+        home = Path(hermes_home) if hermes_home else Path.home() / ".hermes"
+        if _runs_surface_backend():
+            return home / SURFACE_BACKEND_STORE_NAME
+        return home / "lcm.db"
 
     @staticmethod
     def _sqlite_readonly_uri(db_path: Path) -> str:
