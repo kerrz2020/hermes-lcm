@@ -24,6 +24,17 @@ For cleanup, repair, source normalization, or rotate:
 
 Cleanup apply is separately feature-gated. Never infer permission to enable it from a diagnosis request.
 
+## Purging `.corrupt*` archives
+
+`~/.hermes/lcm.db.corrupt*` / `.bak-*` are the recovery path from past corruption events, so they must stay out of routine cleanup. Before deleting any on user request:
+
+1. Skip deletion if a process holds the files (`fuser -v ~/.hermes/lcm.db.corrupt*`).
+2. Open each readable archive read-only and compare `select distinct session_id from messages` against the live DB; a corrupt archive may still hold one session the live DB never reingested.
+3. Salvage any unique session to `~/.hermes/lcm-archive-salvage/<session_id>.jsonl` (rows as JSON per line).
+4. `rm -f ~/.hermes/lcm.db.corrupt*`, then re-check the live DB (`pragma quick_check`, message count) is untouched.
+
+In the incident this runbook came from, readable archives held fewer messages than the live DB; unreadable ones (`file is not a database`, malformed) are unsalvageable.
+
 ## Common states
 
 - Unbound status after restart: send a normal message, then check again.
