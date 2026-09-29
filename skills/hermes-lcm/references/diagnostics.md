@@ -62,6 +62,7 @@ In the incident this runbook came from, readable archives held fewer messages th
 
 ## Common states
 
+- `/lcm` answers `Unknown command /lcm`: the plugin registers the slash surface only when `LCM_ENABLE_SLASH_COMMAND` is truthy, and it is **default off**. Confirm from `gateway.log` — the plugin logs `LCM slash command registration disabled (set LCM_ENABLE_SLASH_COMMAND=1 to enable /lcm)` at load, or `... registration unavailable on this Hermes host` when `ctx.register_command` is missing. The env var is read once at plugin load, so the flag needs a gateway restart.
 - Unbound status after restart: send a normal message, then check again.
 - Database exists but stays empty: verify plugin enablement, `context.engine`, profile, database path, and ignore/stateless patterns.
 - Weak exact recall: verify source rows exist, query construction/scope is correct, summary health is sound, and embedding coverage/provenance matches the requested mode.
