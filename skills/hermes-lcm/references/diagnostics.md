@@ -12,6 +12,14 @@ Use read-only product tools before changing configuration or running an apply pa
 
 If optional slash commands are enabled, `/lcm status` and `/lcm doctor` expose the corresponding operator views.
 
+## Running the test suite locally
+
+The suite builds SQLite stores under `TMPDIR`, and the private-artifact guard refuses any database whose parent directory is group- or world-writable. On a box with a permissive umask the benchmark, stress and ingest tests therefore fail with `PermissionError: refusing SQLite artifact 'lcm.db': parent directory is writable by another user` — that is the guard doing its job, not a regression:
+
+    umask 022; TMPDIR=$(mktemp -d) python -m pytest tests/ -q
+
+Two ingest tests (`test_import_lossless_claw_externalizes_legacy_data_uri_content`, `test_import_lossless_claw_respects_externalization_path_env`) fail on unmodified `v1.0.0-rc.1` as well.
+
 ## Reading integrity verdicts
 
 `database_integrity` and `sqlite_storage` answer for the database FILE, from a dedicated short-lived connection. A long-lived engine connection can hold an FTS5 segment view from before an index merge and answer `PRAGMA integrity_check` with `fts5: corruption found reading blob N`, naming a segment that no longer exists on disk. In that case the file checks stay healthy and `engine_connection_integrity_view` reports the drift instead: restart Hermes to rebind, do not restore from backup.
