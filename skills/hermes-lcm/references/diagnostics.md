@@ -26,6 +26,17 @@ Two ingest tests (`test_import_lossless_claw_externalizes_legacy_data_uri_conten
 
 Before acting on any corruption claim, reproduce it: run `pragma quick_check` on a fresh read-only connection and against a copy of `lcm.db*`. FTS indexes are rebuildable (`/lcm doctor repair`); only a verdict that reproduces on a fresh connection justifies restore.
 
+## Empty lifecycle rows
+
+`lifecycle_fragmentation` warns about rows whose both referenced session IDs hold zero messages and zero summary nodes — nothing was lost, the row is residue from a gateway restart, ephemeral cron tick, or crash-loop.
+
+Two gated paths clean them, and both must run inside the gateway (a second process opening `lcm.db` just re-creates the multi-writer problem):
+
+- Automatic: `empty_lifecycle_gc_enabled` (default true) prunes on session bind, but only when the table exceeds `empty_lifecycle_gc_threshold` (default **200**) and the row is older than `empty_lifecycle_gc_max_age_hours` (default 24). A table of a few dozen rows therefore never gets collected; `LCM_EMPTY_LIFECYCLE_GC_THRESHOLD` is the knob to lower.
+- One-shot: `/lcm doctor clean lifecycle apply` takes its own backup and deletes every eligible row regardless of age. Gated by `LCM_DOCTOR_CLEAN_APPLY_ENABLED`; enable it for the cleanup, then remove it.
+
+Measured on a 48-row table with 31 empty rows: bind-time GC took 17, leaving 14 too young for the age floor. Read-only preview (`/lcm doctor clean lifecycle`) prints the counts first.
+
 ## Safe mutation order
 
 For cleanup, repair, source normalization, or rotate:
