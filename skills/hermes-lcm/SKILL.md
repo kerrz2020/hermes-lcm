@@ -1,6 +1,12 @@
 ---
 name: hermes-lcm
 description: Use, configure, diagnose, and retrieve exact evidence with the Hermes-LCM lossless context plugin.
+triggers:
+  - lcm
+  - hermes-lcm
+  - compacted history
+  - recall from summary
+  - cross-conversation recall
 ---
 
 # Hermes-LCM
