@@ -4469,6 +4469,29 @@ def _lcm_recall_summary_arm(
     return hits, coverage, knn_results.scanned, knn_results.total, []
 
 
+def _chunk_corpus_is_empty(engine: "LCMEngine") -> bool:
+    """True when the raw-history chunk corpus holds no vectors at all.
+
+    The chunk arm resolves the chunk model and embeds the query with it BEFORE it
+    scans, so an unpopulated corpus costs one provider call per recall and returns
+    nothing. Callers skip the arm on True.
+
+    Fails open (False) on any probe error: a corpus that might hold vectors is
+    never silently dropped from recall.
+    """
+    conn = getattr(engine._store, "_conn", None)
+    if conn is None:
+        return False
+    try:
+        if conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='lcm_chunk_meta'"
+        ).fetchone() is None:
+            return True  # no chunk tables at all: nothing to search
+        return conn.execute("SELECT 1 FROM lcm_chunk_vectors LIMIT 1").fetchone() is None
+    except Exception:  # noqa: BLE001 - a probe must never break recall
+        return False
+
+
 def _lcm_recall_chunk_arm(
     engine: "LCMEngine",
     *,
@@ -4667,6 +4690,15 @@ def lcm_recall(args: Dict[str, Any], **kwargs) -> str:
     embedding_query_metrics: list[dict[str, Any]] = []
     timed_out = False
     provider: Any = None
+
+    # An empty chunk corpus cannot produce a chunk hit, but the arm resolves the
+    # chunk model and embeds the query with it (a second provider call under
+    # Voyage's context model) before scanning nothing. Skip it up front and
+    # report exactly what the empty scan used to report.
+    if run_chunk and embeddings_enabled and _chunk_corpus_is_empty(engine):
+        run_chunk = False
+        coverage["chunk"] = "none"
+        degraded_reasons.append("chunk vectors are unavailable")
 
     # -- FTS arm (the default-on value: works with embeddings disabled) --
     if run_fts:

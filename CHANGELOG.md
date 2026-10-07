@@ -4,6 +4,14 @@ This repo also publishes GitHub Releases. This file is the repo-root release sur
 
 ## Unreleased
 
+- `lcm_recall` skips its chunk arm outright when the raw-history chunk corpus
+  holds no vectors. The arm resolves the chunk model and embeds the query with
+  it BEFORE it scans, so an unpopulated corpus (the default: the chunk corpus is
+  opt-in) cost one wasted provider call per recall — a second Voyage request
+  under `voyage-context-4` — to scan nothing. The empty corpus now reports the
+  same `coverage: "none"` and degrade reason the empty scan did, minus the
+  provider round-trip. The probe fails open: any error means "not empty", so a
+  populated corpus is never silently dropped from recall.
 - Keeper connection pins the WAL sidecar for the store's process lifetime, so a
   peer's clean close can no longer delete it out from under a live engine
   (issue #628 class). The sidecar guard now fuses on database identity change

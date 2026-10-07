@@ -177,6 +177,8 @@ def test_voyage_chunk_recall_uses_context_model(recall_engine, monkeypatch):
     chunk.model_id = "voyage-context-4"
     recall_engine._config.embedding_provider = "voyage"
     recall_engine._config.embedding_model = "voyage-3"
+    # The arm is skipped outright when the corpus holds no vectors, so seed one.
+    _seed_chunk_vectors(recall_engine, [(1, 0, 0, 5, [1.0, 0.0])])
 
     def resolve(config):
         return chunk if config.embedding_model == "voyage-context-4" else summary
@@ -205,6 +207,38 @@ def test_voyage_chunk_recall_uses_context_model(recall_engine, monkeypatch):
         "model": "voyage-context-4",
         "query_vector": [0.0, 1.0],
     }
+
+
+def test_empty_chunk_corpus_skips_the_arm(recall_engine, monkeypatch):
+    """An empty chunk corpus must not cost a chunk query embedding (or the arm)."""
+    recall_engine._config.embedding_provider = "voyage"
+    recall_engine._config.embedding_model = "voyage-3"
+    summary = MockProvider()
+    summary.provider_id = "voyage"
+    summary.model_id = "voyage-3"
+    chunk = MockProvider(vector=(0.0, 1.0))
+    chunk.provider_id = "voyage"
+    chunk.model_id = "voyage-context-4"
+    resolved: list[str] = []
+
+    def resolve(config):
+        resolved.append(config.embedding_model)
+        return chunk if config.embedding_model == "voyage-context-4" else summary
+
+    def chunk_arm(*_args, **_kwargs):
+        raise AssertionError("chunk arm must not run when the corpus is empty")
+
+    monkeypatch.setattr(lcm_tools, "resolve_provider", resolve)
+    monkeypatch.setattr(lcm_tools, "_lcm_recall_fts_arm", lambda *_a, **_k: ([], None))
+    monkeypatch.setattr(lcm_tools, "_lcm_recall_chunk_arm", chunk_arm)
+
+    payload = json.loads(
+        lcm_tools.lcm_recall({"query": "q", "include": "verbatim"}, engine=recall_engine)
+    )
+
+    assert "voyage-context-4" not in resolved
+    assert chunk.queries == []
+    assert payload["provenance"]["coverage"].get("chunk") == "none"
 
 
 def test_recall_returns_cross_session_summaries_without_a_filter(recall_engine, monkeypatch):
@@ -1027,6 +1061,8 @@ def test_recall_scans_full_corpus_not_grep_recency_window(recall_engine, monkeyp
     recall_engine._config.recall_scan_rows = 25_000
     recall_engine._config.embedding_bounded_scan_rows = 2_000
     observed: list[int] = []
+    # The chunk arm only runs against a populated corpus (an empty one is skipped).
+    _seed_chunk_vectors(recall_engine, [(1, 0, 0, 5, [1.0, 0.0])])
 
     from hermes_lcm.vector_store import KNNResult
 
