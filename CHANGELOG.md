@@ -4,6 +4,12 @@ This repo also publishes GitHub Releases. This file is the repo-root release sur
 
 ## Unreleased
 
+- The Desktop/SSH backend check declares the host import it consumes
+  (`hermes_cli._startup_fast.is_desktop_ssh_backend_argv`) in
+  `dependency-contract.json`, and the contract version moves to `1.0.5`.
+- The bundled recall skill keeps its frontmatter minimal — `name` and
+  `description` only. The extra `triggers` block no host loader reads, and the
+  bundled-skill conformance test pins the minimal shape.
 - `lcm_recall` skips its chunk arm outright when the raw-history chunk corpus
   holds no vectors. The arm resolves the chunk model and embeds the query with
   it BEFORE it scans, so an unpopulated corpus (the default: the chunk corpus is

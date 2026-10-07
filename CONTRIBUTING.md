@@ -133,6 +133,31 @@ hermes plugins
 
 If you skip part of the default validation, explain why in the PR body.
 
+### Run the suite with a clean LCM environment
+
+`LCM_*` settings already exported in your shell leak into the tests, which read
+their own configuration from the environment. An operator box with embeddings
+enabled (`LCM_EMBEDDINGS_ENABLED=true`, `LCM_EMBEDDING_BINARY_PRESCREEN=true`,
+…) then fails dozens of vector-store tests with `embedding profile is not
+registered` or a `coverage` mismatch that the code does not have. The private
+storage guard also refuses a group- or world-writable parent directory, so a
+permissive `umask` (`0002`) fails the SQLite artifact tests. Ask for a clean
+environment instead of chasing either one:
+
+```bash
+umask 022
+env -u LCM_EMBEDDINGS_ENABLED -u LCM_EMBEDDING_PROVIDER -u LCM_EMBEDDING_MODEL \
+    -u LCM_EMBEDDING_BINARY_PRESCREEN -u LCM_ENABLE_SLASH_COMMAND \
+    -u LCM_TEMPORAL_ROLLUPS_ENABLED -u LCM_LARGE_OUTPUT_EXTERNALIZATION_ENABLED \
+    -u LCM_SENSITIVE_PATTERNS_ENABLED -u LCM_EMPTY_LIFECYCLE_GC_THRESHOLD \
+    pytest -q
+```
+
+When the plugin is installed as source under Hermes Agent, also point
+`PYTHONPATH` at the host checkout (`PYTHONPATH=$HERMES_HOME/hermes-agent`), or
+`tests/conftest.py` execs the root modules without the `agent` package and the
+collection errors misname the missing symbol.
+
 ## Testing expectations
 
 - behavior changes should come with tests
